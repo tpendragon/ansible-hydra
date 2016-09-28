@@ -1,0 +1,46 @@
+---
+# ROLE: hydra-stack
+# roles/hydra-stack/install/tasks/fedora.yml
+#
+# NOTE: While the fedora_database supports inserting other databases than levelDB, others have not been tested do not use them.
+# Until other databases have been tested, only use minimal-default for fedora_database.
+- name: download fedora
+  become: yes
+  get_url: url=http://repo1.maven.org/maven2/org/fcrepo/fcrepo-webapp/{{ fedora_version }}/fcrepo-webapp-{{ fedora_version }}.war owner={{ ansible_ssh_user }} group={{ ansible_ssh_user }} dest={{ install_path }}/fcrepo-webapp-{{ fedora_version }}.war timeout=100
+
+- name: make fedora data dir
+  file: owner=tomcat7 group=tomcat7 state=directory path=/opt/fedora-data
+  become: yes
+
+- name: check fedora.war
+  become: yes
+  stat: path=/var/lib/tomcat7/webapps/fedora.war
+  register: fedora_war
+
+- name: copy over fedora.war
+  become: yes
+  command: cp {{ install_path }}/fcrepo-webapp-{{ fedora_version }}.war /var/lib/tomcat7/webapps/fedora.war
+  when: fedora_war.stat.exists == False
+
+- name: create tomcat config and java options
+  become: yes
+  template: src=tomcat7.j2 dest=/etc/default/tomcat7 backup=yes
+
+- name: clear old java_opts
+  become: yes
+  lineinfile: 
+    dest: /etc/default/tomcat7
+    state: absent
+    regexp: ^JAVA_OPTS=
+
+- name: insert fedora 4.6 compliant java_opts
+  become: yes
+  lineinfile: 
+    dest: /etc/default/tomcat7
+    state: present
+    line: JAVA_OPTS="-Dfcrepo.home=/opt/fedora-data -Dfcrepo.modeshape.configuration=classpath:/config/{{ fedora_database }}/repository.json -Djava.awt.headless=true -XX:+UseG1GC -XX:+UseCompressedOops -XX:-UseLargePagesIndividualAllocation -XX:MaxPermSize={{ tomcat_permgen_memory }} -Xms{{ tomcat_min_memory }} -Xmx{{ tomcat_max_memory }} -Djava.util.logging.config.file=/etc/tomcat7/logging.properties -server"
+    insertafter: ^JAVA_HOME
+
+- name: restart tomcat
+  become: yes
+  service: name=tomcat7 enabled=yes state=restarted
